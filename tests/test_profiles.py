@@ -16,6 +16,7 @@ CS_PROFILE = Path("examples/jquery-c2.3.14.profile")
 CS_JSON = Path("examples/jquery-c2.3.14.profile.json")
 MYTHIC_JSON = Path("examples/mythic-httpx.json")
 SLIVER_JSON = Path("examples/sliver.json")
+SLIVER_LEGACY_JSON = Path("examples/sliver-legacy.json")
 
 
 @pytest.mark.skipif(not CS_PROFILE.exists(), reason="CS profile not found")
@@ -242,9 +243,22 @@ class TestSliverExportedProfile:
 
 
 @pytest.mark.skipif(not SLIVER_JSON.exists(), reason="Sliver example not found")
-class TestSliverStageSpecificProfile:
-    def test_example_still_parses(self):
+class TestSliverExampleProfile:
+    def test_example_parses(self):
         profile = parse_sliver_file(SLIVER_JSON)
+        assert profile.http_get is not None
+        assert profile.http_post is not None
+        assert profile.all_uris()
+
+
+@pytest.mark.skipif(
+    not SLIVER_LEGACY_JSON.exists(), reason="Sliver legacy example not found"
+)
+class TestSliverStageSpecificProfile:
+    """Pre-1.6 profiles still parse; the stage-specific keys remain supported."""
+
+    def test_legacy_example_still_parses(self):
+        profile = parse_sliver_file(SLIVER_LEGACY_JSON)
         assert profile.http_get is not None
         assert profile.http_post is not None
 
