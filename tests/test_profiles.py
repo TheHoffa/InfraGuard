@@ -7,6 +7,7 @@ import pytest
 from infraguard.profiles.cobalt_strike import CobaltStrikeParser, parse_cobalt_strike_file
 from infraguard.profiles.models import C2Profile, Transform
 from infraguard.profiles.mythic import MythicHTTPParser, parse_mythic_file
+from infraguard.profiles.sliver import SliverParser, parse_sliver_file
 from infraguard.profiles.transforms import TransformChain
 
 # ── Cobalt Strike parser ──────────────────────────────────────────────
@@ -14,6 +15,8 @@ from infraguard.profiles.transforms import TransformChain
 CS_PROFILE = Path("examples/jquery-c2.3.14.profile")
 CS_JSON = Path("examples/jquery-c2.3.14.profile.json")
 MYTHIC_JSON = Path("examples/mythic-httpx.json")
+SLIVER_JSON = Path("examples/sliver.json")
+SLIVER_LEGACY_JSON = Path("examples/sliver-legacy.json")
 
 
 @pytest.mark.skipif(not CS_PROFILE.exists(), reason="CS profile not found")
@@ -157,3 +160,116 @@ class TestTransformChain:
         assert encoded != data
         decoded = chain.decode(encoded)
         assert decoded == data
+
+
+# ── Sliver parser ─────────────────────────────────────────────────────
+
+# As returned by the teamserver's GetHTTPC2ProfileByName RPC: protobuf-JSON,
+# so .proto field names rather than the ones `c2profile export` writes.
+SLIVER_API_JSON = """{
+  "ID": "ff585828-8e07-4fc1-a1b5-05a6c378b108",
+  "Created": "1792418590",
+  "Name": "default",
+  "ServerConfig": {
+    "Headers": [
+      {"Method": "GET", "Name": "Cache-Control", "Value": "no-store", "Probability": 100}
+    ],
+    "Cookies": [{"Name": "JSESSIONID"}, {"Name": "PHPSESSID"}]
+  },
+  "ImplantConfig": {
+    "UserAgent": "",
+    "ChromeBaseVersion": 106,
+    "extensions": ["js", "", "php"],
+    "PathSegments": [
+      {"IsFile": true, "Value": "bootstrap"},
+      {"IsFile": true, "Value": "jquery.min"},
+      {"IsFile": false, "Value": "assets"},
+      {"IsFile": false, "Value": "static"}
+    ],
+    "NonceMode": "UrlParam",
+    "NonceQueryLength": 1
+  }
+}"""
+
+# The format `c2profile export` writes: unified extensions/files/paths.
+SLIVER_EXPORT_JSON = """{
+  "implant_config": {
+    "user_agent": "",
+    "extensions": ["js", "php"],
+    "files": ["bootstrap"],
+    "paths": ["assets"]
+  },
+  "server_config": {
+    "headers": [{"name": "Server", "value": "nginx", "probability": 100}],
+    "cookies": ["PHPSESSID"]
+  }
+}"""
+
+
+class TestSliverApiShapedProfile:
+    """Profiles taken from the gRPC API, not from `c2profile export`."""
+
+    def test_parses_into_uris(self):
+        profile = SliverParser().parse(SLIVER_API_JSON)
+        assert profile.http_get is not None
+        assert profile.http_post is not None
+        assert profile.all_uris()
+
+    def test_path_segments_split_by_isfile(self):
+        profile = SliverParser().parse(SLIVER_API_JSON)
+        uris = set(profile.all_uris())
+        # paths come from IsFile=false, files from IsFile=true
+        assert "/assets/bootstrap.js" in uris
+        assert "/static/jquery.min.php" in uris
+        # an empty extension means no suffix at all
+        assert "/assets/bootstrap" in uris
+
+    def test_cookies_are_unwrapped(self):
+        profile = SliverParser().parse(SLIVER_API_JSON)
+        assert profile.global_options["cookies"] == "JSESSIONID,PHPSESSID"
+
+    def test_server_headers_survive(self):
+        profile = SliverParser().parse(SLIVER_API_JSON)
+        assert profile.http_get.server.headers["Cache-Control"] == "no-store"
+
+
+class TestSliverExportedProfile:
+    def test_unified_keys_still_parse(self):
+        profile = SliverParser().parse(SLIVER_EXPORT_JSON)
+        uris = set(profile.all_uris())
+        assert "/assets/bootstrap.js" in uris
+        assert "/assets/bootstrap.php" in uris
+        assert profile.global_options["cookies"] == "PHPSESSID"
+
+
+@pytest.mark.skipif(not SLIVER_JSON.exists(), reason="Sliver example not found")
+class TestSliverExampleProfile:
+    def test_example_parses(self):
+        profile = parse_sliver_file(SLIVER_JSON)
+        assert profile.http_get is not None
+        assert profile.http_post is not None
+        assert profile.all_uris()
+
+
+@pytest.mark.skipif(
+    not SLIVER_LEGACY_JSON.exists(), reason="Sliver legacy example not found"
+)
+class TestSliverStageSpecificProfile:
+    """Pre-1.6 profiles still parse; the stage-specific keys remain supported."""
+
+    def test_legacy_example_still_parses(self):
+        profile = parse_sliver_file(SLIVER_LEGACY_JSON)
+        assert profile.http_get is not None
+        assert profile.http_post is not None
+
+
+class TestSliverProfileErrors:
+    def test_unrecognised_shape_raises(self):
+        # A Sliver *implant* config, not an HTTP C2 profile - an easy mix-up.
+        with pytest.raises(ValueError, match="unrecognised Sliver profile"):
+            SliverParser().parse('{"GOOS": "linux", "GOARCH": "amd64"}')
+
+    def test_profile_with_no_uris_raises(self):
+        # Parsed fine but generates nothing, so it would block every request.
+        with pytest.raises(ValueError, match="no URIs"):
+            SliverParser().parse('{"implant_config": {}, "server_config": {}}')
