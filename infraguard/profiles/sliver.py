@@ -42,9 +42,75 @@ class SliverParser:
         with open(path, encoding="utf-8") as f:
             return self.parse(f.read())
 
+    @staticmethod
+    def _normalise(data: dict[str, Any]) -> dict[str, Any]:
+        """Fold the teamserver API's protobuf-JSON shape into the file shape.
+
+        ``GetHTTPC2ProfileByName`` returns HTTPC2Config as protojson, which
+        uses the .proto field names rather than the ones ``c2profile export``
+        writes: ``ImplantConfig``/``ServerConfig`` at the top, PascalCase
+        throughout (except ``extensions``, which is lowercase in the proto),
+        and files and paths in a single ``PathSegments`` list discriminated by
+        ``IsFile``. Anything built against the gRPC API hands us this shape.
+
+        Everything below this point then sees one shape.
+        """
+        if "ImplantConfig" not in data and "ServerConfig" not in data:
+            return data
+
+        api_implant = data.get("ImplantConfig") or {}
+        api_server = data.get("ServerConfig") or {}
+
+        def _headers(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+            return [
+                {
+                    "name": h.get("Name", ""),
+                    "value": h.get("Value", ""),
+                    "probability": h.get("Probability", 100),
+                    "method": h.get("Method", ""),
+                }
+                for h in items or []
+            ]
+
+        files: list[str] = []
+        paths: list[str] = []
+        for seg in api_implant.get("PathSegments") or []:
+            target = files if seg.get("IsFile") else paths
+            target.append(seg.get("Value", ""))
+
+        return {
+            "implant_config": {
+                "user_agent": api_implant.get("UserAgent", ""),
+                "extensions": api_implant.get("extensions") or [],
+                "files": files,
+                "paths": paths,
+                "headers": _headers(api_implant.get("Headers")),
+                "url_parameters": _headers(api_implant.get("ExtraURLParameters")),
+                "max_files": api_implant.get("MaxFileGen", 0),
+                "min_files": api_implant.get("MinFileGen", 0),
+                "max_paths": api_implant.get("MaxPathGen", 0),
+                "min_paths": api_implant.get("MinPathGen", 0),
+            },
+            "server_config": {
+                "random_version_headers": api_server.get("RandomVersionHeaders", False),
+                "headers": _headers(api_server.get("Headers")),
+                "cookies": [c.get("Name", "") for c in api_server.get("Cookies") or []],
+            },
+        }
+
     def _parse_dict(self, data: dict[str, Any]) -> C2Profile:
+        data = self._normalise(data)
         implant = data.get("implant_config", {})
         server = data.get("server_config", {})
+
+        # Key presence, not truthiness: an empty but present implant_config is a
+        # recognised profile that happens to be empty, and should fall through
+        # to the no-URIs error below rather than be reported as the wrong shape.
+        if "implant_config" not in data and "server_config" not in data:
+            raise ValueError(
+                "unrecognised Sliver profile: expected 'implant_config'/'server_config' "
+                "(or 'ImplantConfig'/'ServerConfig' from the teamserver API)"
+            )
 
         # Fallback: generic paths/files/extensions for profiles that
         # don't use stage-specific keys (common in operator-generated
@@ -97,6 +163,15 @@ class SliverParser:
 
         # POST transaction: session + start_session URIs
         post_uris = list(set(session_uris + start_session_uris))
+
+        # A profile that generates no URIs matches nothing, so the filter would
+        # block every request including legitimate beacon traffic. Fail here,
+        # where the operator can still see why, rather than at request time.
+        if not get_uris and not post_uris:
+            raise ValueError(
+                "Sliver profile produced no URIs - check that extensions, files "
+                "and paths (or the stage-specific *_files/*_paths keys) are populated"
+            )
 
         # Server response headers
         resp_headers: dict[str, str] = {}
