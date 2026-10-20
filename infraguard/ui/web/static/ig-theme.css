@@ -118,6 +118,10 @@ h1, h2, h3, .card h3 {
 }
 .nav a:hover { color: var(--text); border-bottom-color: var(--border-strong); }
 .nav a.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+/* A badge with no value must take no space: the nav markup is identical on
+   every page, but only the Overview fills these in. Without this an empty
+   span renders as a blank pill. */
+.nav a .count:empty { display: none; }
 .nav a .count {
     display: inline-block;
     margin-left: 6px;

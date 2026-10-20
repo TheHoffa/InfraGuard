@@ -153,6 +153,7 @@
         details pre { font-size: 10px; color: var(--text-dim); background: var(--bg); padding: 6px; border-radius: 4px; margin-top: 4px; overflow-x: auto; }
     </style>
     <link rel="stylesheet" href="/static/ig-theme.css">
+    <script src="/static/ig-nav.js"></script>
 </head>
 <body>
 
@@ -170,9 +171,9 @@
 
     <div class="nav" role="navigation" aria-label="Dashboard sections">
         <a href="/">Overview</a>
-        <a href="/static/decoys.html">Decoys</a>
-        <a href="/static/health.html">Health</a>
-        <a href="/static/plugins.html" class="active">Plugins</a>
+        <a href="/static/decoys.html">Decoys<span class="count" id="nav-count-decoys"></span></a>
+        <a href="/static/health.html">Health<span class="count" id="nav-count-health"></span></a>
+        <a href="/static/plugins.html" class="active">Plugins<span class="count" id="nav-count-plugins"></span></a>
     </div>
 
     <div class="grid">

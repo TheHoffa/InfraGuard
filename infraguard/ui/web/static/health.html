@@ -157,6 +157,7 @@
         .refresh-info { font-size: 11px; color: var(--text-dim); }
     </style>
     <link rel="stylesheet" href="/static/ig-theme.css">
+    <script src="/static/ig-nav.js"></script>
 </head>
 <body>
 
@@ -178,9 +179,9 @@
     <!-- ── Nav ─────────────────────────────────────────────── -->
     <div class="nav" role="navigation" aria-label="Dashboard sections">
         <a href="/">Overview</a>
-        <a href="/static/decoys.html">Decoys</a>
-        <a href="/static/health.html" class="active">Health</a>
-        <a href="/static/plugins.html">Plugins</a>
+        <a href="/static/decoys.html">Decoys<span class="count" id="nav-count-decoys"></span></a>
+        <a href="/static/health.html" class="active">Health<span class="count" id="nav-count-health"></span></a>
+        <a href="/static/plugins.html">Plugins<span class="count" id="nav-count-plugins"></span></a>
     </div>
 
     <div class="grid">
